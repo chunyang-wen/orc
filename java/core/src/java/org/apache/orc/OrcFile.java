@@ -19,20 +19,29 @@
 package org.apache.orc;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.orc.impl.MemoryManager;
 import org.apache.orc.impl.OrcTail;
 import org.apache.orc.impl.ReaderImpl;
 import org.apache.orc.impl.WriterImpl;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Contains factory methods to read or write ORC files.
  */
 public class OrcFile {
+  private static final Logger LOG = LoggerFactory.getLogger(OrcFile.class);
   public static final String MAGIC = "ORC";
 
   /**
@@ -52,7 +61,8 @@ public class OrcFile {
    */
   public enum Version {
     V_0_11("0.11", 0, 11),
-    V_0_12("0.12", 0, 12);
+    V_0_12("0.12", 0, 12),
+    FUTURE("future", Integer.MAX_VALUE, Integer.MAX_VALUE);
 
     public static final Version CURRENT = V_0_12;
 
@@ -108,6 +118,7 @@ public class OrcFile {
     HIVE_4243(2), // use real column names from Hive tables
     HIVE_12055(3), // vectorized writer
     HIVE_13083(4), // decimal writer updating present stream wrongly
+    ORC_101(5),    // bloom filters use utf8
 
     // Don't use any magic numbers here except for the below:
     FUTURE(Integer.MAX_VALUE); // a version from a future writer
@@ -140,12 +151,28 @@ public class OrcFile {
       }
     }
 
+    /**
+     * Convert the integer from OrcProto.PostScript.writerVersion
+     * to the enumeration with unknown versions being mapped to FUTURE.
+     * @param val the serialized writer version
+     * @return the corresponding enumeration value
+     */
     public static WriterVersion from(int val) {
-      if (val == FUTURE.id) return FUTURE; // Special handling for the magic value.
+      if (val >= values.length) {
+        return FUTURE;
+      }
       return values[val];
     }
+
+    public boolean includes(WriterVersion other) {
+      return id >= other.id;
+    }
   }
-  public static final WriterVersion CURRENT_WRITER = WriterVersion.HIVE_13083;
+
+  /**
+   * The WriterVersion for this version of the software.
+   */
+  public static final WriterVersion CURRENT_WRITER = WriterVersion.ORC_101;
 
   public enum EncodingStrategy {
     SPEED, COMPRESSION
@@ -231,6 +258,33 @@ public class OrcFile {
     void preFooterWrite(WriterContext context) throws IOException;
   }
 
+  public enum BloomFilterVersion {
+    // Include both the BLOOM_FILTER and BLOOM_FILTER_UTF8 streams to support
+    // both old and new readers.
+    ORIGINAL("original"),
+    // Only include the BLOOM_FILTER_UTF8 streams that consistently use UTF8.
+    // See ORC-101
+    UTF8("utf8");
+
+    private final String id;
+    BloomFilterVersion(String id) {
+      this.id = id;
+    }
+
+    public String toString() {
+      return id;
+    }
+
+    public static BloomFilterVersion fromString(String s) {
+      for (BloomFilterVersion version: values()) {
+        if (version.id.equals(s)) {
+          return version;
+        }
+      }
+      throw new IllegalArgumentException("Unknown BloomFilterVersion " + s);
+    }
+  }
+
   /**
    * Options for creating ORC file writers.
    */
@@ -253,6 +307,9 @@ public class OrcFile {
     private double paddingTolerance;
     private String bloomFilterColumns;
     private double bloomFilterFpp;
+    private BloomFilterVersion bloomFilterVersion;
+    private PhysicalWriter physicalWriter;
+    private WriterVersion writerVersion = CURRENT_WRITER;
 
     protected WriterOptions(Properties tableProperties, Configuration conf) {
       configuration = conf;
@@ -286,6 +343,10 @@ public class OrcFile {
           conf);
       bloomFilterFpp = OrcConf.BLOOM_FILTER_FPP.getDouble(tableProperties,
           conf);
+      bloomFilterVersion =
+          BloomFilterVersion.fromString(
+              OrcConf.BLOOM_FILTER_WRITE_VERSION.getString(tableProperties,
+                  conf));
     }
 
     /**
@@ -430,10 +491,45 @@ public class OrcFile {
     }
 
     /**
+     * Set the version of the bloom filters to write.
+     */
+    public WriterOptions bloomFilterVersion(BloomFilterVersion version) {
+      this.bloomFilterVersion = version;
+      return this;
+    }
+
+    /**
+     * Change the physical writer of the ORC file.
+     *
+     * SHOULD ONLY BE USED BY LLAP.
+     *
+     * @param writer the writer to control the layout and persistence
+     * @return this
+     */
+    public WriterOptions physicalWriter(PhysicalWriter writer) {
+      this.physicalWriter = writer;
+      return this;
+    }
+
+    /**
      * A package local option to set the memory manager.
      */
     protected WriterOptions memory(MemoryManager value) {
       memoryManagerValue = value;
+      return this;
+    }
+
+    /**
+     * Manually set the writer version.
+     * This is an internal API.
+     * @param version the version to write
+     * @return this
+     */
+    protected WriterOptions writerVersion(WriterVersion version) {
+      if (version == WriterVersion.FUTURE) {
+        throw new IllegalArgumentException("Can't write a future version.");
+      }
+      this.writerVersion = version;
       return this;
     }
 
@@ -508,6 +604,18 @@ public class OrcFile {
     public double getBloomFilterFpp() {
       return bloomFilterFpp;
     }
+
+    public BloomFilterVersion getBloomFilterVersion() {
+      return bloomFilterVersion;
+    }
+
+    public PhysicalWriter getPhysicalWriter() {
+      return physicalWriter;
+    }
+
+    public WriterVersion getWriterVersion() {
+      return writerVersion;
+    }
   }
 
   /**
@@ -563,4 +671,199 @@ public class OrcFile {
     return new WriterImpl(fs, path, opts);
   }
 
+  /**
+   * Do we understand the version in the reader?
+   * @param path the path of the file
+   * @param reader the ORC file reader
+   * @return is the version understood by this writer?
+   */
+  static boolean understandFormat(Path path, Reader reader) {
+    if (reader.getFileVersion() == Version.FUTURE) {
+      LOG.info("Can't merge {} because it has a future version.", path);
+      return false;
+    }
+    if (reader.getWriterVersion() == WriterVersion.FUTURE) {
+      LOG.info("Can't merge {} because it has a future writerVersion.", path);
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Is the new reader compatible with the file that is being written?
+   * @param schema the writer schema
+   * @param fileVersion the writer fileVersion
+   * @param writerVersion the writer writerVersion
+   * @param rowIndexStride the row index stride
+   * @param compression the compression that was used
+   * @param userMetadata the user metadata
+   * @param path the new path name for warning messages
+   * @param reader the new reader
+   * @return is the reader compatible with the previous ones?
+   */
+  static boolean readerIsCompatible(TypeDescription schema,
+                                    Version fileVersion,
+                                    WriterVersion writerVersion,
+                                    int rowIndexStride,
+                                    CompressionKind compression,
+                                    Map<String, ByteBuffer> userMetadata,
+                                    Path path,
+                                    Reader reader) {
+    // now we have to check compatibility
+    if (!reader.getSchema().equals(schema)) {
+      LOG.info("Can't merge {} because of different schemas {} vs {}",
+          path, reader.getSchema(), schema);
+      return false;
+    }
+    if (reader.getCompressionKind() != compression) {
+      LOG.info("Can't merge {} because of different compression {} vs {}",
+          path, reader.getCompressionKind(), compression);
+      return false;
+    }
+    if (reader.getFileVersion() != fileVersion) {
+      LOG.info("Can't merge {} because of different file versions {} vs {}",
+          path, reader.getFileVersion(), fileVersion);
+      return false;
+    }
+    if (reader.getWriterVersion() != writerVersion) {
+      LOG.info("Can't merge {} because of different writer versions {} vs {}",
+          path, reader.getFileVersion(), fileVersion);
+      return false;
+    }
+    if (reader.getRowIndexStride() != rowIndexStride) {
+      LOG.info("Can't merge {} because of different row index strides {} vs {}",
+          path, reader.getRowIndexStride(), rowIndexStride);
+      return false;
+    }
+    for(String key: reader.getMetadataKeys()) {
+      if (userMetadata.containsKey(key)) {
+        ByteBuffer currentValue = userMetadata.get(key);
+        ByteBuffer newValue = reader.getMetadataValue(key);
+        if (!newValue.equals(currentValue)) {
+          LOG.info("Can't merge {} because of different user metadata {}", path,
+              key);
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  static void mergeMetadata(Map<String,ByteBuffer> metadata,
+                            Reader reader) {
+    for(String key: reader.getMetadataKeys()) {
+      metadata.put(key, reader.getMetadataValue(key));
+    }
+  }
+
+  /**
+   * Merges multiple ORC files that all have the same schema to produce
+   * a single ORC file.
+   * The merge will reject files that aren't compatible with the merged file
+   * so the output list may be shorter than the input list.
+   * The stripes are copied as serialized byte buffers.
+   * The user metadata are merged and files that disagree on the value
+   * associated with a key will be rejected.
+   *
+   * @param outputPath the output file
+   * @param options the options for writing with although the options related
+   *                to the input files' encodings are overridden
+   * @param inputFiles the list of files to merge
+   * @return the list of files that were successfully merged
+   * @throws IOException
+   */
+  public static List<Path> mergeFiles(Path outputPath,
+                                      WriterOptions options,
+                                      List<Path> inputFiles) throws IOException {
+    Writer output = null;
+    final Configuration conf = options.getConfiguration();
+    try {
+      byte[] buffer = new byte[0];
+      TypeDescription schema = null;
+      CompressionKind compression = null;
+      int bufferSize = 0;
+      Version fileVersion = null;
+      WriterVersion writerVersion = null;
+      int rowIndexStride = 0;
+      List<Path> result = new ArrayList<>(inputFiles.size());
+      Map<String, ByteBuffer> userMetadata = new HashMap<>();
+
+      for (Path input : inputFiles) {
+        FileSystem fs = input.getFileSystem(conf);
+        Reader reader = createReader(input,
+            readerOptions(options.getConfiguration()).filesystem(fs));
+
+        if (!understandFormat(input, reader)) {
+          continue;
+        } else if (schema == null) {
+          // if this is the first file that we are including, grab the values
+          schema = reader.getSchema();
+          compression = reader.getCompressionKind();
+          bufferSize = reader.getCompressionSize();
+          rowIndexStride = reader.getRowIndexStride();
+          fileVersion = reader.getFileVersion();
+          writerVersion = reader.getWriterVersion();
+          options.blockSize(bufferSize)
+              .version(fileVersion)
+              .writerVersion(writerVersion)
+              .compress(compression)
+              .rowIndexStride(rowIndexStride)
+              .setSchema(schema);
+          if (compression != CompressionKind.NONE) {
+            options.enforceBufferSize().bufferSize(bufferSize);
+          }
+          mergeMetadata(userMetadata, reader);
+          output = createWriter(outputPath, options);
+        } else if (!readerIsCompatible(schema, fileVersion, writerVersion,
+            rowIndexStride, compression, userMetadata, input, reader)) {
+          continue;
+        } else {
+          mergeMetadata(userMetadata, reader);
+          if (bufferSize < reader.getCompressionSize()) {
+            bufferSize = reader.getCompressionSize();
+            ((WriterImpl) output).increaseCompressionSize(bufferSize);
+          }
+        }
+        List<OrcProto.StripeStatistics> statList =
+            reader.getOrcProtoStripeStatistics();
+        try (FSDataInputStream inputStream = fs.open(input)) {
+          int stripeNum = 0;
+          result.add(input);
+
+          for (StripeInformation stripe : reader.getStripes()) {
+            int length = (int) stripe.getLength();
+            if (buffer.length < length) {
+              buffer = new byte[length];
+            }
+            long offset = stripe.getOffset();
+            inputStream.readFully(offset, buffer, 0, length);
+            output.appendStripe(buffer, 0, length, stripe, statList.get(stripeNum++));
+          }
+        }
+      }
+      if (output != null) {
+        for (Map.Entry<String, ByteBuffer> entry : userMetadata.entrySet()) {
+          output.addUserMetadata(entry.getKey(), entry.getValue());
+        }
+        output.close();
+      }
+      return result;
+    } catch (IOException ioe) {
+      if (output != null) {
+        try {
+          output.close();
+        } catch (Throwable t) {
+          // PASS
+        }
+        try {
+          FileSystem fs = options.getFileSystem() == null ?
+              outputPath.getFileSystem(conf) : options.getFileSystem();
+          fs.delete(outputPath, false);
+        } catch (Throwable t) {
+          // PASS
+        }
+      }
+      throw ioe;
+    }
+  }
 }

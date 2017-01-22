@@ -187,16 +187,22 @@ public class ReaderImpl implements Reader {
     return types;
   }
 
-  @Override
-  public OrcFile.Version getFileVersion() {
+  public static OrcFile.Version getFileVersion(List<Integer> versionList) {
+    if (versionList == null || versionList.isEmpty()) {
+      return OrcFile.Version.V_0_11;
+    }
     for (OrcFile.Version version: OrcFile.Version.values()) {
-      if ((versionList != null && !versionList.isEmpty()) &&
-          version.getMajor() == versionList.get(0) &&
+      if (version.getMajor() == versionList.get(0) &&
           version.getMinor() == versionList.get(1)) {
         return version;
       }
     }
-    return OrcFile.Version.V_0_11;
+    return OrcFile.Version.FUTURE;
+  }
+
+  @Override
+  public OrcFile.Version getFileVersion() {
+    return getFileVersion(versionList);
   }
 
   @Override
@@ -216,7 +222,11 @@ public class ReaderImpl implements Reader {
 
   @Override
   public ColumnStatistics[] getStatistics() {
-    ColumnStatistics[] result = new ColumnStatistics[types.size()];
+    return deserializeStats(fileStats);
+  }
+
+  static ColumnStatistics[] deserializeStats(List<OrcProto.ColumnStatistics> fileStats){
+    ColumnStatistics[] result = new ColumnStatistics[fileStats.size()];
     for(int i=0; i < result.length; ++i) {
       result[i] = ColumnStatisticsImpl.deserialize(fileStats.get(i));
     }
@@ -495,6 +505,11 @@ public class ReaderImpl implements Reader {
         size = maxFileLength;
         modificationTime = -1;
       }
+      // Anything lesser than MAGIC header cannot be valid (valid ORC file is actually around 45 bytes, this is
+      // more conservative)
+      if (size <= OrcFile.MAGIC.length()) {
+        throw new FileFormatException("Not a valid ORC file");
+      }
       fileTailBuilder.setFileLength(size);
 
       //read last bytes into buffer to get PostScript
@@ -580,18 +595,6 @@ public class ReaderImpl implements Reader {
   @Override
   public RecordReader rows(Options options) throws IOException {
     LOG.info("Reading ORC rows from " + path + " with " + options);
-    boolean[] include = options.getInclude();
-    // if included columns is null, then include all columns
-    if (include == null) {
-      options = options.clone();
-      TypeDescription readSchema = options.getSchema();
-      if (readSchema == null) {
-        readSchema = schema;
-      }
-      include = new boolean[readSchema.getMaximumId() + 1];
-      Arrays.fill(include, true);
-      options.include(include);
-    }
     return new RecordReaderImpl(this, options);
   }
 

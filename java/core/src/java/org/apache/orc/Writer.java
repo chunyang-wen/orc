@@ -20,6 +20,7 @@ package org.apache.orc;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -31,7 +32,7 @@ import org.apache.orc.TypeDescription;
 /**
  * The interface for writing ORC files.
  */
-public interface Writer {
+public interface Writer extends Closeable {
 
   /**
    * Get the schema for this writer
@@ -111,4 +112,16 @@ public interface Writer {
    * @param userMetadata - user metadata
    */
   public void appendUserMetadata(List<OrcProto.UserMetadataItem> userMetadata);
+
+  /**
+   * Get the statistics about the columns in the file. The output of this is
+   * based on the time at which it is called. It shall use all of the currently
+   * written data to provide the statistics.
+   *
+   * Please note there are costs involved with invoking this method and should
+   * be used judiciously.
+   *
+   * @return the information about the column
+   */
+  ColumnStatistics[] getStatistics() throws IOException;
 }

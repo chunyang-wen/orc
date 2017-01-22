@@ -105,6 +105,16 @@ public enum OrcConf {
           "dictionary or not will be retained thereafter."),
   BLOOM_FILTER_COLUMNS("orc.bloom.filter.columns", "orc.bloom.filter.columns",
       "", "List of columns to create bloom filters for when writing."),
+  BLOOM_FILTER_WRITE_VERSION("orc.bloom.filter.write.version",
+      "orc.bloom.filter.write.version", OrcFile.BloomFilterVersion.UTF8.toString(),
+      "Which version of the bloom filters should we write.\n" +
+          "The choices are:\n" +
+          "  original - writes two versions of the bloom filters for use by\n" +
+          "             both old and new readers.\n" +
+          "  utf8 - writes just the new bloom filters."),
+  IGNORE_NON_UTF8_BLOOM_FILTERS("orc.bloom.filter.ignore.non-utf8",
+      "orc.bloom.filter.ignore.non-utf8", false,
+      "Should the reader ignore the obsolete non-UTF8 bloom filters."),
   MAX_FILE_LENGTH("orc.max.file.length", "orc.max.file.length", Long.MAX_VALUE,
       "The maximum size of the file to read for finding the file tail. This\n" +
           "is primarily used for streaming ingest to read intermediate\n" +
@@ -127,7 +137,12 @@ public enum OrcConf {
   KRYO_SARG("orc.kryo.sarg", "orc.kryo.sarg", null,
       "The kryo and base64 encoded SearchArgument for predicate pushdown."),
   SARG_COLUMNS("orc.sarg.column.names", "org.sarg.column.names", null,
-      "The list of column names for the SearchArgument.")
+      "The list of column names for the SearchArgument."),
+  FORCE_POSITIONAL_EVOLUTION("orc.force.positional.evolution",
+      "orc.force.positional.evolution", false,
+      "Require schema evolution to match the top level columns using position\n" +
+      "rather than column names. This provides backwards compatibility with\n" +
+      "Hive 2.1.")
   ;
 
   private final String attribute;

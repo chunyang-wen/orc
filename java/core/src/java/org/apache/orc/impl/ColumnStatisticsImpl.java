@@ -20,6 +20,7 @@ package org.apache.orc.impl;
 import java.sql.Date;
 import java.sql.Timestamp;
 
+import org.apache.hadoop.hive.serde2.io.HiveDecimalWritable;
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.serde2.io.DateWritable;
 import org.apache.hadoop.io.BytesWritable;
@@ -38,6 +39,34 @@ import org.apache.orc.TimestampColumnStatistics;
 import org.apache.orc.TypeDescription;
 
 public class ColumnStatisticsImpl implements ColumnStatistics {
+
+  @Override
+  public boolean equals(Object o) {
+    if (this == o) {
+      return true;
+    }
+    if (!(o instanceof ColumnStatisticsImpl)) {
+      return false;
+    }
+
+    ColumnStatisticsImpl that = (ColumnStatisticsImpl) o;
+
+    if (count != that.count) {
+      return false;
+    }
+    if (hasNull != that.hasNull) {
+      return false;
+    }
+
+    return true;
+  }
+
+  @Override
+  public int hashCode() {
+    int result = (int) (count ^ (count >>> 32));
+    result = 31 * result + (hasNull ? 1 : 0);
+    return result;
+  }
 
   private static final class BooleanStatisticsImpl extends ColumnStatisticsImpl
       implements BooleanColumnStatistics {
@@ -101,6 +130,34 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
     @Override
     public String toString() {
       return super.toString() + " true: " + trueCount;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof BooleanStatisticsImpl)) {
+        return false;
+      }
+      if (!super.equals(o)) {
+        return false;
+      }
+
+      BooleanStatisticsImpl that = (BooleanStatisticsImpl) o;
+
+      if (trueCount != that.trueCount) {
+        return false;
+      }
+
+      return true;
+    }
+
+    @Override
+    public int hashCode() {
+      int result = super.hashCode();
+      result = 31 * result + (int) (trueCount ^ (trueCount >>> 32));
+      return result;
     }
   }
 
@@ -247,6 +304,50 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
       }
       return buf.toString();
     }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof IntegerStatisticsImpl)) {
+        return false;
+      }
+      if (!super.equals(o)) {
+        return false;
+      }
+
+      IntegerStatisticsImpl that = (IntegerStatisticsImpl) o;
+
+      if (minimum != that.minimum) {
+        return false;
+      }
+      if (maximum != that.maximum) {
+        return false;
+      }
+      if (sum != that.sum) {
+        return false;
+      }
+      if (hasMinimum != that.hasMinimum) {
+        return false;
+      }
+      if (overflow != that.overflow) {
+        return false;
+      }
+
+      return true;
+    }
+
+    @Override
+    public int hashCode() {
+      int result = super.hashCode();
+      result = 31 * result + (int) (minimum ^ (minimum >>> 32));
+      result = 31 * result + (int) (maximum ^ (maximum >>> 32));
+      result = 31 * result + (int) (sum ^ (sum >>> 32));
+      result = 31 * result + (hasMinimum ? 1 : 0);
+      result = 31 * result + (overflow ? 1 : 0);
+      return result;
+    }
   }
 
   private static final class DoubleStatisticsImpl extends ColumnStatisticsImpl
@@ -363,6 +464,50 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
       buf.append(" sum: ");
       buf.append(sum);
       return buf.toString();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof DoubleStatisticsImpl)) {
+        return false;
+      }
+      if (!super.equals(o)) {
+        return false;
+      }
+
+      DoubleStatisticsImpl that = (DoubleStatisticsImpl) o;
+
+      if (hasMinimum != that.hasMinimum) {
+        return false;
+      }
+      if (Double.compare(that.minimum, minimum) != 0) {
+        return false;
+      }
+      if (Double.compare(that.maximum, maximum) != 0) {
+        return false;
+      }
+      if (Double.compare(that.sum, sum) != 0) {
+        return false;
+      }
+
+      return true;
+    }
+
+    @Override
+    public int hashCode() {
+      int result = super.hashCode();
+      long temp;
+      result = 31 * result + (hasMinimum ? 1 : 0);
+      temp = Double.doubleToLongBits(minimum);
+      result = 31 * result + (int) (temp ^ (temp >>> 32));
+      temp = Double.doubleToLongBits(maximum);
+      result = 31 * result + (int) (temp ^ (temp >>> 32));
+      temp = Double.doubleToLongBits(sum);
+      result = 31 * result + (int) (temp ^ (temp >>> 32));
+      return result;
     }
   }
 
@@ -498,6 +643,42 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
       }
       return buf.toString();
     }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof StringStatisticsImpl)) {
+        return false;
+      }
+      if (!super.equals(o)) {
+        return false;
+      }
+
+      StringStatisticsImpl that = (StringStatisticsImpl) o;
+
+      if (sum != that.sum) {
+        return false;
+      }
+      if (minimum != null ? !minimum.equals(that.minimum) : that.minimum != null) {
+        return false;
+      }
+      if (maximum != null ? !maximum.equals(that.maximum) : that.maximum != null) {
+        return false;
+      }
+
+      return true;
+    }
+
+    @Override
+    public int hashCode() {
+      int result = super.hashCode();
+      result = 31 * result + (minimum != null ? minimum.hashCode() : 0);
+      result = 31 * result + (maximum != null ? maximum.hashCode() : 0);
+      result = 31 * result + (int) (sum ^ (sum >>> 32));
+      return result;
+    }
   }
 
   protected static final class BinaryStatisticsImpl extends ColumnStatisticsImpl implements
@@ -569,13 +750,43 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
       }
       return buf.toString();
     }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof BinaryStatisticsImpl)) {
+        return false;
+      }
+      if (!super.equals(o)) {
+        return false;
+      }
+
+      BinaryStatisticsImpl that = (BinaryStatisticsImpl) o;
+
+      if (sum != that.sum) {
+        return false;
+      }
+
+      return true;
+    }
+
+    @Override
+    public int hashCode() {
+      int result = super.hashCode();
+      result = 31 * result + (int) (sum ^ (sum >>> 32));
+      return result;
+    }
   }
 
   private static final class DecimalStatisticsImpl extends ColumnStatisticsImpl
       implements DecimalColumnStatistics {
-    private HiveDecimal minimum = null;
-    private HiveDecimal maximum = null;
-    private HiveDecimal sum = HiveDecimal.ZERO;
+
+    // These objects are mutable for better performance.
+    private HiveDecimalWritable minimum = null;
+    private HiveDecimalWritable maximum = null;
+    private HiveDecimalWritable sum = new HiveDecimalWritable(0);
 
     DecimalStatisticsImpl() {
     }
@@ -584,13 +795,13 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
       super(stats);
       OrcProto.DecimalStatistics dec = stats.getDecimalStatistics();
       if (dec.hasMaximum()) {
-        maximum = HiveDecimal.create(dec.getMaximum());
+        maximum = new HiveDecimalWritable(dec.getMaximum());
       }
       if (dec.hasMinimum()) {
-        minimum = HiveDecimal.create(dec.getMinimum());
+        minimum = new HiveDecimalWritable(dec.getMinimum());
       }
       if (dec.hasSum()) {
-        sum = HiveDecimal.create(dec.getSum());
+        sum = new HiveDecimalWritable(dec.getSum());
       } else {
         sum = null;
       }
@@ -601,21 +812,21 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
       super.reset();
       minimum = null;
       maximum = null;
-      sum = HiveDecimal.ZERO;
+      sum = new HiveDecimalWritable(0);
     }
 
     @Override
-    public void updateDecimal(HiveDecimal value) {
+    public void updateDecimal(HiveDecimalWritable value) {
       if (minimum == null) {
-        minimum = value;
-        maximum = value;
+        minimum = new HiveDecimalWritable(value);
+        maximum = new HiveDecimalWritable(value);
       } else if (minimum.compareTo(value) > 0) {
-        minimum = value;
+        minimum.set(value);
       } else if (maximum.compareTo(value) < 0) {
-        maximum = value;
+        maximum.set(value);
       }
       if (sum != null) {
-        sum = sum.add(value);
+        sum.mutateAdd(value);
       }
     }
 
@@ -624,20 +835,20 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
       if (other instanceof DecimalStatisticsImpl) {
         DecimalStatisticsImpl dec = (DecimalStatisticsImpl) other;
         if (minimum == null) {
-          minimum = dec.minimum;
-          maximum = dec.maximum;
+          minimum = (dec.minimum != null ? new HiveDecimalWritable(dec.minimum) : null);
+          maximum = (dec.maximum != null ? new HiveDecimalWritable(dec.maximum) : null);
           sum = dec.sum;
         } else if (dec.minimum != null) {
           if (minimum.compareTo(dec.minimum) > 0) {
-            minimum = dec.minimum;
+            minimum.set(dec.minimum);
           }
           if (maximum.compareTo(dec.maximum) < 0) {
-            maximum = dec.maximum;
+            maximum.set(dec.maximum);
           }
           if (sum == null || dec.sum == null) {
             sum = null;
           } else {
-            sum = sum.add(dec.sum);
+            sum.mutateAdd(dec.sum);
           }
         }
       } else {
@@ -657,7 +868,8 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
         dec.setMinimum(minimum.toString());
         dec.setMaximum(maximum.toString());
       }
-      if (sum != null) {
+      // Check isSet for overflow.
+      if (sum != null && sum.isSet()) {
         dec.setSum(sum.toString());
       }
       result.setDecimalStatistics(dec);
@@ -666,17 +878,17 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
 
     @Override
     public HiveDecimal getMinimum() {
-      return minimum;
+      return minimum.getHiveDecimal();
     }
 
     @Override
     public HiveDecimal getMaximum() {
-      return maximum;
+      return maximum.getHiveDecimal();
     }
 
     @Override
     public HiveDecimal getSum() {
-      return sum;
+      return sum.getHiveDecimal();
     }
 
     @Override
@@ -693,6 +905,42 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
         }
       }
       return buf.toString();
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof DecimalStatisticsImpl)) {
+        return false;
+      }
+      if (!super.equals(o)) {
+        return false;
+      }
+
+      DecimalStatisticsImpl that = (DecimalStatisticsImpl) o;
+
+      if (minimum != null ? !minimum.equals(that.minimum) : that.minimum != null) {
+        return false;
+      }
+      if (maximum != null ? !maximum.equals(that.maximum) : that.maximum != null) {
+        return false;
+      }
+      if (sum != null ? !sum.equals(that.sum) : that.sum != null) {
+        return false;
+      }
+
+      return true;
+    }
+
+    @Override
+    public int hashCode() {
+      int result = super.hashCode();
+      result = 31 * result + (minimum != null ? minimum.hashCode() : 0);
+      result = 31 * result + (maximum != null ? maximum.hashCode() : 0);
+      result = 31 * result + (sum != null ? sum.hashCode() : 0);
+      return result;
     }
   }
 
@@ -815,6 +1063,46 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
       }
       return buf.toString();
     }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof DateStatisticsImpl)) {
+        return false;
+      }
+      if (!super.equals(o)) {
+        return false;
+      }
+
+      DateStatisticsImpl that = (DateStatisticsImpl) o;
+
+      if (minimum != null ? !minimum.equals(that.minimum) : that.minimum != null) {
+        return false;
+      }
+      if (maximum != null ? !maximum.equals(that.maximum) : that.maximum != null) {
+        return false;
+      }
+      if (minDate != null ? !minDate.equals(that.minDate) : that.minDate != null) {
+        return false;
+      }
+      if (maxDate != null ? !maxDate.equals(that.maxDate) : that.maxDate != null) {
+        return false;
+      }
+
+      return true;
+    }
+
+    @Override
+    public int hashCode() {
+      int result = super.hashCode();
+      result = 31 * result + (minimum != null ? minimum.hashCode() : 0);
+      result = 31 * result + (maximum != null ? maximum.hashCode() : 0);
+      result = 31 * result + (minDate != null ? minDate.hashCode() : 0);
+      result = 31 * result + (maxDate != null ? maxDate.hashCode() : 0);
+      return result;
+    }
   }
 
   private static final class TimestampStatisticsImpl extends ColumnStatisticsImpl
@@ -925,6 +1213,38 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
       }
       return buf.toString();
     }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      }
+      if (!(o instanceof TimestampStatisticsImpl)) {
+        return false;
+      }
+      if (!super.equals(o)) {
+        return false;
+      }
+
+      TimestampStatisticsImpl that = (TimestampStatisticsImpl) o;
+
+      if (minimum != null ? !minimum.equals(that.minimum) : that.minimum != null) {
+        return false;
+      }
+      if (maximum != null ? !maximum.equals(that.maximum) : that.maximum != null) {
+        return false;
+      }
+
+      return true;
+    }
+
+    @Override
+    public int hashCode() {
+      int result = super.hashCode();
+      result = 31 * result + (minimum != null ? minimum.hashCode() : 0);
+      result = 31 * result + (maximum != null ? maximum.hashCode() : 0);
+      return result;
+    }
   }
 
   private long count = 0;
@@ -987,7 +1307,7 @@ public class ColumnStatisticsImpl implements ColumnStatistics {
     throw new UnsupportedOperationException("Can't update string");
   }
 
-  public void updateDecimal(HiveDecimal value) {
+  public void updateDecimal(HiveDecimalWritable value) {
     throw new UnsupportedOperationException("Can't update decimal");
   }
 

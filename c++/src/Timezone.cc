@@ -650,7 +650,8 @@ namespace orc {
     DIAGNOSTIC_IGNORE("-Wglobal-constructors")
     DIAGNOSTIC_IGNORE("-Wexit-time-destructors")
   #endif
-  static std::map<std::string, Timezone*> timezoneCache;
+  static std::mutex timezone_mutex;
+  static std::map<std::string, std::unique_ptr<Timezone> > timezoneCache;
   DIAGNOSTIC_POP
 
   Timezone::~Timezone() {
@@ -688,10 +689,12 @@ namespace orc {
    * Results are cached.
    */
   const Timezone& getTimezoneByFilename(const std::string& filename) {
-    std::map<std::string, Timezone*>::iterator itr =
+    // ORC-110
+    std::lock_guard<std::mutex> timezone_lock(timezone_mutex);
+    std::map<std::string, std::unique_ptr<Timezone> >::iterator itr =
       timezoneCache.find(filename);
     if (itr != timezoneCache.end()) {
-      return *(itr->second);
+      return *(itr->second).get();
     }
     int in = open(filename.c_str(), O_RDONLY);
     if (in == -1) {
@@ -726,9 +729,8 @@ namespace orc {
       err << "failed to close " << filename << " - " << strerror(errno);
       throw TimezoneError(err.str());
     }
-    Timezone* result = new TimezoneImpl(filename, buffer);
-    timezoneCache[filename] = result;
-    return *result;
+    timezoneCache[filename].reset(new TimezoneImpl(filename, buffer));
+    return *timezoneCache[filename].get();
   }
 
   /**

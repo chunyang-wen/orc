@@ -238,6 +238,8 @@ public class TestFileDump {
       writer.addRowBatch(batch);
     }
     writer.close();
+    assertEquals(2079000, writer.getRawDataSize());
+    assertEquals(21000, writer.getNumberOfRows());
     PrintStream origOut = System.out;
     String outputFilename = "orc-file-dump.out";
     FileOutputStream myOut = new FileOutputStream(workDir + File.separator + outputFilename);
@@ -306,6 +308,8 @@ public class TestFileDump {
     writer.addRowBatch(batch);
 
     writer.close();
+    assertEquals(1564, 0, writer.getRawDataSize());
+    assertEquals(2, writer.getNumberOfRows());
     PrintStream origOut = System.out;
     ByteArrayOutputStream myOut = new ByteArrayOutputStream();
 
@@ -445,8 +449,9 @@ public class TestFileDump {
         .compress(CompressionKind.ZLIB)
         .bufferSize(10000)
         .rowIndexStride(1000)
-        .bloomFilterColumns("l")
-        .bloomFilterFpp(0.01);
+        .bloomFilterColumns("l,s")
+        .bloomFilterFpp(0.01)
+        .bloomFilterVersion(OrcFile.BloomFilterVersion.ORIGINAL);
     VectorizedRowBatch batch = schema.createRowBatch(1000);
     Writer writer = OrcFile.createWriter(testFilePath, options);
     Random r1 = new Random(1);
@@ -482,7 +487,6 @@ public class TestFileDump {
     FileDump.main(new String[]{testFilePath.toString(), "--rowindex=2"});
     System.out.flush();
     System.setOut(origOut);
-
 
     checkOutput(outputFilename, workDir + File.separator + outputFilename);
   }

@@ -67,6 +67,15 @@ CHECK_CXX_SOURCE_COMPILES("
 )
 
 CHECK_CXX_SOURCE_COMPILES("
+    #include<mutex>
+    int main(int, char *[]) {
+       std::mutex test_mutex;
+       std::lock_guard<std::mutex> lock_mutex(test_mutex);
+    }"
+  HAS_STD_MUTEX
+)
+
+CHECK_CXX_SOURCE_COMPILES("
     #include<string>
     std::string func() {
       std::string var = \"test\";
@@ -140,6 +149,8 @@ add_library (orc STATIC
   RLEv1.cc
   RLEv2.cc
   RLE.cc
+  Statistics.cc
+  StripeStream.cc
   Timezone.cc
   TypeImpl.cc
   Vector.cc
